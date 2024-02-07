@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	normalize "github.com/marstr/baronial-normalize"
+	"github.com/marstr/baronial-normalize/fetch"
 	"github.com/marstr/baronial-normalize/fetch/alphavantage"
 	"github.com/spf13/viper"
 )
@@ -23,6 +25,7 @@ const alphavantageApiKeyKey = "AVKEY"
 var httpConfig *viper.Viper = viper.New()
 
 var alphaVantageClient alphavantage.Client
+var cache *fetch.Cache
 
 func main() {
 	httpConfig.GetUint(portKey)
@@ -32,6 +35,13 @@ func main() {
 		alphaVantageClient = alphavantage.Client{ApiKey: httpConfig.GetString(alphavantageApiKeyKey)}
 	} else {
 		log.Fatal("No Alpha Vantage API Key Found")
+	}
+
+	var err error
+	cache, err = fetch.NewCache(alphaVantageClient, 100)
+	cache.TTL = 72 * time.Hour
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	address := fmt.Sprintf(":%d", httpConfig.GetUint(portKey))
@@ -63,7 +73,7 @@ func GetQuoteV1(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	log.Println("Get Quote: ", requestedSymbol)
-	price, err := alphaVantageClient.QuoteSymbol(ctx, requestedSymbol)
+	price, err := cache.QuoteSymbol(ctx, normalize.Symbol(requestedSymbol))
 	if err != nil {
 		resp.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintln(resp, err)

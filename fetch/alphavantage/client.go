@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -42,7 +43,7 @@ type GlobalQuoteResponse struct {
 	ChangePercent    string  `json:"10. change percent"`
 }
 
-func (avc Client) RawQuoteSymbol(ctx context.Context, symbol string) (GlobalQuoteResponse, error) {
+func (avc Client) RawQuoteSymbol(ctx context.Context, symbol normalize.Symbol) (GlobalQuoteResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.alphavantage.co/query", nil)
 	if err != nil {
 		return GlobalQuoteResponse{}, err
@@ -50,10 +51,11 @@ func (avc Client) RawQuoteSymbol(ctx context.Context, symbol string) (GlobalQuot
 
 	q := req.URL.Query()
 	q.Set("function", "GLOBAL_QUOTE")
-	q.Set("symbol", symbol)
+	q.Set("symbol", string(symbol))
 	q.Set("apikey", avc.ApiKey)
 	req.URL.RawQuery = q.Encode()
 
+	log.Println("querying Alpha Vantage API for ", symbol)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return GlobalQuoteResponse{}, err
@@ -77,7 +79,7 @@ func (avc Client) RawQuoteSymbol(ctx context.Context, symbol string) (GlobalQuot
 	return unmarshaled.GlobalQuote, nil
 }
 
-func (avc Client) QuoteSymbol(ctx context.Context, symbol string) (normalize.Quote, error) {
+func (avc Client) QuoteSymbol(ctx context.Context, symbol normalize.Symbol) (normalize.Quote, error) {
 
 	wrapped, err := avc.RawQuoteSymbol(ctx, symbol)
 	if err != nil {
