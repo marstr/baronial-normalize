@@ -27,7 +27,7 @@ const alphavantageApiKeyKey = "AVKEY"
 
 const upstreamKey = "UPSTREAM"
 
-var cache *fetch.Cache
+var cache *fetch.MemCache
 
 func main() {
 	httpConfig.GetUint(portKey)
@@ -51,7 +51,7 @@ func main() {
 	}
 
 	var err error
-	cache, err = fetch.NewCache(quoteSrc, 100)
+	cache, err = fetch.NewMemCache(quoteSrc, 100)
 	cache.TTL = 72 * time.Hour
 	if err != nil {
 		log.Fatal(err)

@@ -9,21 +9,21 @@ import (
 	"github.com/marstr/collection/v2"
 )
 
-type Cache struct {
+type MemCache struct {
 	underlyer   *collection.LRUCache[normalize.Symbol, normalize.Quote]
 	Passthrough Quoter
 	TTL         time.Duration
 }
 
-func NewCache(passthru Quoter, capacity uint) (*Cache, error) {
+func NewMemCache(passthru Quoter, capacity uint) (*MemCache, error) {
 
-	return &Cache{
+	return &MemCache{
 		underlyer:   collection.NewLRUCache[normalize.Symbol, normalize.Quote](capacity),
 		Passthrough: passthru,
 	}, nil
 }
 
-func (c Cache) QuoteSymbol(ctx context.Context, symbol normalize.Symbol) (normalize.Quote, error) {
+func (c MemCache) QuoteSymbol(ctx context.Context, symbol normalize.Symbol) (normalize.Quote, error) {
 	if c.TTL == time.Duration(0) {
 		c.TTL = 24 * time.Hour
 	}
