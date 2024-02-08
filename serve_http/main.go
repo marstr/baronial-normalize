@@ -97,13 +97,14 @@ func init() {
 
 func getMethodEnforcement(handlers map[string]http.HandlerFunc) http.HandlerFunc {
 	var generateQuoteHandlersError sync.Once
-	var quoteMethodListPlain string
-	var quoteMethodListJson *json.RawMessage
-	var methodResponseBody *bytes.Buffer
+	var methodListPlain string
+	var methodListJson json.RawMessage
 
 	return func(resp http.ResponseWriter, req *http.Request) {
 		handler, ok := handlers[req.Method]
-		if !ok {
+		if ok {
+			handler(resp, req)
+		} else {
 			generateQuoteHandlersError.Do(func() {
 				keys := make([]string, 0, len(quotehandlers))
 				for k := range quotehandlers {
@@ -111,38 +112,38 @@ func getMethodEnforcement(handlers map[string]http.HandlerFunc) http.HandlerFunc
 				}
 				sort.Strings(keys)
 
-				var listBuf *bytes.Buffer
+				var listBuf bytes.Buffer
 
 				for _, method := range keys {
-					_, err := fmt.Fprintf(listBuf, "%s, ", method)
+					_, err := fmt.Fprintf(&listBuf, "%s, ", method)
 					if err != nil {
 						log.Fatal(err)
 					}
 				}
 				listBuf.Truncate(listBuf.Len() - 2)
-				quoteMethodListPlain = listBuf.String()
+				methodListPlain = listBuf.String()
 
-				acceptedListEncoder := json.NewEncoder(methodResponseBody)
+				var jsonBuf bytes.Buffer
+				acceptedListEncoder := json.NewEncoder(&jsonBuf)
 				err := acceptedListEncoder.Encode(keys)
 				if err != nil {
 					log.Fatal(err)
 				}
+				methodListJson = json.RawMessage(jsonBuf.Bytes())
 			})
 
 			resp.WriteHeader(http.StatusMethodNotAllowed)
-			resp.Header().Add("Allow", quoteMethodListPlain)
+			resp.Header().Add("Allow", methodListPlain)
 
 			c := struct {
 				Error    string           `json:"error"`
 				Accepted *json.RawMessage `json:"accepted"`
-			}{fmt.Sprintf("%q is not an accepted HTTP Method for this operation, see accepted", req.Method), quoteMethodListJson}
+			}{fmt.Sprintf("%q is not an accepted HTTP Method for this operation.", req.Method), &methodListJson}
 			respBodyWriter := json.NewEncoder(resp)
 			err := respBodyWriter.Encode(c)
 			if err != nil {
 				log.Println("Error: ", err)
 			}
 		}
-
-		handler(resp, req)
 	}
 }
