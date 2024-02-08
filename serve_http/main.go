@@ -132,8 +132,9 @@ func getMethodEnforcement(handlers map[string]http.HandlerFunc) http.HandlerFunc
 				methodListJson = json.RawMessage(jsonBuf.Bytes())
 			})
 
-			resp.WriteHeader(http.StatusMethodNotAllowed)
 			resp.Header().Add("Allow", methodListPlain)
+			resp.Header().Add("Content-Type", "application/json; charset=utf-8")
+			resp.WriteHeader(http.StatusMethodNotAllowed)
 
 			c := struct {
 				Error    string           `json:"error"`
