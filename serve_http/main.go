@@ -14,31 +14,44 @@ import (
 	normalize "github.com/marstr/baronial-normalize"
 	"github.com/marstr/baronial-normalize/fetch"
 	"github.com/marstr/baronial-normalize/fetch/alphavantage"
+	"github.com/marstr/baronial-normalize/fetch/upstream"
 	"github.com/spf13/viper"
 )
 
 const defaultPort = 4754
 const portKey = "PORT"
 
-const alphavantageApiKeyKey = "AVKEY"
-
 var httpConfig *viper.Viper = viper.New()
 
-var alphaVantageClient alphavantage.Client
+const alphavantageApiKeyKey = "AVKEY"
+
+const upstreamKey = "UPSTREAM"
+
 var cache *fetch.Cache
 
 func main() {
 	httpConfig.GetUint(portKey)
 	http.HandleFunc("/api/v0/quote", getMethodEnforcement(quotehandlers))
 
+	var quoteSrc fetch.Quoter
+
+	if httpConfig.IsSet(upstreamKey) {
+		upstreamAddr := httpConfig.GetString(upstreamKey)
+		quoteSrc = upstream.Client{Address: upstreamAddr}
+		log.Printf("Using upstream %s as source of quotes\n", upstreamAddr)
+	}
+
 	if httpConfig.IsSet(alphavantageApiKeyKey) {
-		alphaVantageClient = alphavantage.Client{ApiKey: httpConfig.GetString(alphavantageApiKeyKey)}
-	} else {
-		log.Fatal("No Alpha Vantage API Key Found")
+		quoteSrc = alphavantage.Client{ApiKey: httpConfig.GetString(alphavantageApiKeyKey)}
+		log.Println("Using Alpha Vantage as source of quotes")
+	}
+
+	if quoteSrc == nil {
+		log.Fatal("No source of quotes configured.")
 	}
 
 	var err error
-	cache, err = fetch.NewCache(alphaVantageClient, 100)
+	cache, err = fetch.NewCache(quoteSrc, 100)
 	cache.TTL = 72 * time.Hour
 	if err != nil {
 		log.Fatal(err)
@@ -57,6 +70,8 @@ var quotehandlers = map[string]http.HandlerFunc{
 func GetQuoteV1(resp http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	resp.Header().Add("Content-Type", "application/json; charset=utf-8")
 
 	requestedSymbol := req.URL.Query().Get("symbol")
 	if requestedSymbol == "" {
@@ -77,6 +92,7 @@ func GetQuoteV1(resp http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		resp.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintln(resp, err)
+		return
 	}
 
 	resp.WriteHeader(http.StatusOK)
