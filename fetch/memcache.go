@@ -31,7 +31,7 @@ func (c MemCache) QuoteSymbol(ctx context.Context, symbol normalize.Symbol) (nor
 	staleAt := time.Now().Add(-c.TTL)
 
 	if val, ok := c.underlyer.Get(symbol); ok && val.LastRefreshed.After(staleAt) {
-		log.Println("returning cached value for ", symbol)
+		log.Println("returning mem cached value for ", symbol)
 		return val, nil
 	}
 

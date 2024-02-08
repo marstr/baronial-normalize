@@ -26,36 +26,55 @@ var httpConfig *viper.Viper = viper.New()
 const alphavantageApiKeyKey = "AVKEY"
 
 const upstreamKey = "UPSTREAM"
+const fileCacheLocKey = "CACHEPATH"
 
-var cache *fetch.MemCache
+const memCacheLimitKey = "MEMCACHE_LIMIT"
+const memCacheLimitDefault = 100
+
+const cacheTtlKey = "CACHE_TTLHOURS"
+const cacheTtlDefault = 72
+
+var quoter fetch.Quoter
 
 func main() {
 	httpConfig.GetUint(portKey)
 	http.HandleFunc("/api/v0/quote", getMethodEnforcement(quotehandlers))
 
-	var quoteSrc fetch.Quoter
-
 	if httpConfig.IsSet(upstreamKey) {
 		upstreamAddr := httpConfig.GetString(upstreamKey)
-		quoteSrc = upstream.Client{Address: upstreamAddr}
+		quoter = upstream.Client{Address: upstreamAddr}
 		log.Printf("Using upstream %s as source of quotes\n", upstreamAddr)
 	}
 
 	if httpConfig.IsSet(alphavantageApiKeyKey) {
-		quoteSrc = alphavantage.Client{ApiKey: httpConfig.GetString(alphavantageApiKeyKey)}
+		quoter = alphavantage.Client{ApiKey: httpConfig.GetString(alphavantageApiKeyKey)}
 		log.Println("Using Alpha Vantage as source of quotes")
 	}
 
-	if quoteSrc == nil {
+	if quoter == nil {
 		log.Fatal("No source of quotes configured.")
 	}
 
-	var err error
-	cache, err = fetch.NewMemCache(quoteSrc, 100)
-	cache.TTL = 72 * time.Hour
+	cacheTtl := time.Hour * time.Duration(httpConfig.GetInt(cacheTtlKey))
+	if httpConfig.IsSet(fileCacheLocKey) {
+		cacheLoc := httpConfig.GetString(fileCacheLocKey)
+		log.Println("Using filecache at ", cacheLoc)
+		fileCache, err := fetch.NewFileCache(quoter, cacheLoc)
+		fileCache.TTL = cacheTtl
+		if err != nil {
+			log.Fatal(err)
+		}
+		quoter = fileCache
+	}
+
+	memCacheLimit := httpConfig.GetUint(memCacheLimitKey)
+	log.Println("Using memcache with quote limit of ", memCacheLimit)
+	memCache, err := fetch.NewMemCache(quoter, memCacheLimit)
 	if err != nil {
 		log.Fatal(err)
 	}
+	memCache.TTL = cacheTtl
+	quoter = memCache
 
 	address := fmt.Sprintf(":%d", httpConfig.GetUint(portKey))
 	log.Println("Baronial Normalize API listening at: ", address)
@@ -88,7 +107,7 @@ func GetQuoteV1(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	log.Println("Get Quote: ", requestedSymbol)
-	price, err := cache.QuoteSymbol(ctx, normalize.Symbol(requestedSymbol))
+	price, err := quoter.QuoteSymbol(ctx, normalize.Symbol(requestedSymbol))
 	if err != nil {
 		resp.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintln(resp, err)
@@ -108,6 +127,8 @@ func init() {
 	httpConfig.AddConfigPath("http")
 	httpConfig.SetEnvPrefix("BNHTTP")
 	httpConfig.SetDefault(portKey, defaultPort)
+	httpConfig.SetDefault(memCacheLimitKey, memCacheLimitDefault)
+	httpConfig.SetDefault(cacheTtlKey, cacheTtlDefault)
 	httpConfig.AutomaticEnv()
 }
 
