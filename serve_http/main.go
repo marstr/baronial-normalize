@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -15,6 +17,7 @@ import (
 	"github.com/marstr/baronial-normalize/fetch"
 	"github.com/marstr/baronial-normalize/fetch/alphavantage"
 	"github.com/marstr/baronial-normalize/fetch/upstream"
+	"github.com/marstr/units/data"
 	"github.com/spf13/viper"
 )
 
@@ -35,6 +38,7 @@ const cacheTtlKey = "CACHE_TTLHOURS"
 const cacheTtlDefault = 72
 
 var quoter fetch.Quoter
+var fileCache *fetch.FileCache
 
 func main() {
 	httpConfig.GetUint(portKey)
@@ -59,7 +63,8 @@ func main() {
 	if httpConfig.IsSet(fileCacheLocKey) {
 		cacheLoc := httpConfig.GetString(fileCacheLocKey)
 		log.Println("Using filecache at ", cacheLoc)
-		fileCache, err := fetch.NewFileCache(quoter, cacheLoc)
+		var err error
+		fileCache, err = fetch.NewFileCache(quoter, cacheLoc)
 		fileCache.TTL = cacheTtl
 		if err != nil {
 			log.Fatal(err)
@@ -108,9 +113,22 @@ func GetQuoteV1(resp http.ResponseWriter, req *http.Request) {
 
 	log.Println("Get Quote: ", requestedSymbol)
 	price, err := quoter.QuoteSymbol(ctx, normalize.Symbol(requestedSymbol))
-	if err != nil {
+	if err != nil && errors.Is(err, normalize.BadSymbol(requestedSymbol)) {
+		resp.WriteHeader(http.StatusNotFound)
+		c := struct {
+			Error  string `json:"error"`
+			Symbol string `json:"symbol"`
+		}{err.Error(), requestedSymbol}
+		enc := json.NewEncoder(resp)
+		enc.Encode(c)
+		return
+	} else if err != nil {
 		resp.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintln(resp, err)
+		c := struct {
+			Error string `json:"error"`
+		}{err.Error()}
+		enc := json.NewEncoder(resp)
+		enc.Encode(c)
 		return
 	}
 
@@ -120,7 +138,43 @@ func GetQuoteV1(resp http.ResponseWriter, req *http.Request) {
 }
 
 func SetQuoteV1(resp http.ResponseWriter, req *http.Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
+	resp.Header().Add("Content-Type", "application/json; charset=utf-8")
+
+	var toSet normalize.Quote
+	limitReader := io.LimitReader(req.Body, int64(10*data.Kilobyte))
+	dec := json.NewDecoder(limitReader)
+	err := dec.Decode(&toSet)
+	if err != nil {
+		resp.WriteHeader(http.StatusBadRequest)
+		c := struct {
+			Error   string `json:"error"`
+			Wrapped string `json:"detail"`
+		}{"could not read body of request as quote", err.Error()}
+		enc := json.NewEncoder(resp)
+		enc.Encode(c)
+		return
+	}
+
+	if toSet.LastRefreshed.Equal(time.Time{}) {
+		toSet.LastRefreshed = time.Now()
+	}
+
+	err = fileCache.WriteQuote(ctx, toSet)
+	if err != nil {
+		resp.WriteHeader(http.StatusInternalServerError)
+		c := struct {
+			Error   string `json:"error"`
+			Wrapped string `json:"detail"`
+		}{"failed to write error", err.Error()}
+		enc := json.NewEncoder(resp)
+		enc.Encode(c)
+		return
+	}
+
+	resp.WriteHeader(http.StatusNoContent)
 }
 
 func init() {

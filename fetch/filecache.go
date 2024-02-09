@@ -52,15 +52,22 @@ func (fc FileCache) QuoteSymbol(ctx context.Context, symbol normalize.Symbol) (n
 	if err != nil {
 		return normalize.Quote{}, err
 	}
-	if file, err := os.Create(fileLoc); err == nil {
+
+	err = fc.WriteQuote(ctx, updated)
+
+	return updated, err
+}
+
+func (fc FileCache) WriteQuote(ctx context.Context, quote normalize.Quote) error {
+	fileLoc := fc.getFileLocation(quote.Symbol)
+	var err error
+	var file *os.File
+	if file, err = os.Create(fileLoc); err == nil {
 		defer file.Close()
 		enc := json.NewEncoder(file)
-		err = enc.Encode(updated)
-		if err != nil {
-			return updated, err
-		}
+		err = enc.Encode(quote)
 	}
-	return updated, nil
+	return err
 }
 
 func (fc FileCache) getFileLocation(symbol normalize.Symbol) string {

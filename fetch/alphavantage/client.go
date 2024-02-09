@@ -3,6 +3,7 @@ package alphavantage
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -19,10 +20,20 @@ type Client struct {
 	ApiKey string
 }
 
-type ServerError Response
+type ServerErr Response
 
-func (se ServerError) Error() string {
+func (se ServerErr) Error() string {
 	return se.Information
+}
+
+type BadSymbol normalize.Symbol
+
+func (bs BadSymbol) Error() string {
+	return fmt.Sprintf("Alpha Vantage returned no results for symbol %q", string(bs))
+}
+
+func (bs BadSymbol) Unwrap() error {
+	return normalize.BadSymbol(bs)
 }
 
 type Response struct {
@@ -73,7 +84,11 @@ func (avc Client) RawQuoteSymbol(ctx context.Context, symbol normalize.Symbol) (
 	}
 
 	if unmarshaled.Information != "" {
-		return GlobalQuoteResponse{}, ServerError(unmarshaled)
+		return GlobalQuoteResponse{}, ServerErr(unmarshaled)
+	}
+
+	if unmarshaled.GlobalQuote.Symbol == "" {
+		return GlobalQuoteResponse{}, BadSymbol(symbol)
 	}
 
 	return unmarshaled.GlobalQuote, nil
